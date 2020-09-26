@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Created on Thu Apr 16 15:07:17 2020
 
-@author: joycezheng
-"""
 from scipy.spatial import distance as dist
 import cv2
 import numpy as np
@@ -14,34 +10,31 @@ import pandas as pd
 import argparse
 import imutils
 from imutils.video import FileVideoStream
-import time
 from imutils import face_utils
 import dlib
+import torch 
 
 ap = argparse.ArgumentParser()
 ap.add_argument("-v", "--video-file", required=True, help="video file in current directory")
-ap.add_argument("--frame-step", type=int, default = 10, help="framecount which video frames are predicted")
 ap.add_argument("--save", dest="save", action = "store_true")
-ap.add_argument("--no-save", dest="save", action = "store_false")
 ap.add_argument("--savedata", dest="savedata", action = "store_true")
-ap.add_argument("--no-savedata", dest="savedata", action = "store_false")
+
 ap.set_defaults(savedata = False)
 ap.set_defaults(save = False)
 args = vars(ap.parse_args())
 
-path = "/Users/adyasingh/Desktop/gitFace/FacialExpressionRecognition/"
+path = "/Users/adyasingh/Desktop/body-language-detector/EmotionDetector/"
 vidcap = FileVideoStream(args["video_file"]).start()
-count = 0
 framecount = 0
-learn = load_learner(path, 'export.pkl')
+learn = load_learner(path, 'model.pkl')
 data = []
+atten = []
 
 EYE_AR_THRESH = 0.3
 EYE_AR_CONSEC_FRAMES = 40
-
+prediction =''
 COUNTER = 0
 ALARM_ON = False
-
 face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
 
 def eye_aspect_ratio(eye):
@@ -79,31 +72,33 @@ while vidcap.more():
         leftEAR = eye_aspect_ratio(leftEye)
         rightEAR = eye_aspect_ratio(rightEye)
         ear = (leftEAR + rightEAR) / 2.0
-        leftEyeHull = cv2.convexHull(leftEye)
-        rightEyeHull = cv2.convexHull(rightEye)
-        cv2.drawContours(frame, [leftEyeHull], -1, (0, 255, 0), 1)
-        cv2.drawContours(frame, [rightEyeHull], -1, (0, 255, 0), 1)
+       
         if ear < EYE_AR_THRESH:
             COUNTER += 1
             if COUNTER >= EYE_AR_CONSEC_FRAMES:
-                cv2.putText(frame, "Distracted Driving", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                cv2.putText(frame, "Low Attention", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                if framecount % 10 == 0:
+                    atten.append([framecount,"Low"])
         else:
             COUNTER = 0
             ALARM_ON = False
-        cv2.putText(frame, "Eye Ratio: {:.2f}".format(ear), (250, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            if framecount % 10 == 0:
+                atten.append([framecount,"Normal"])
+       
+        if framecount % 10 == 0:
+            prediction, idx, probability_ten = learn.predict(Image(pil2tensor(img_cp, np.float32).div_(225)))
+            probability = probability_ten.tolist()
+            confident = probability[0]
+            enthusiastic  = probability[1]
+            frustrated = probability[2]
+            nervous = probability[3]
+            neutral = probability[4]
+            scared = probability[5]
+            uncomfortable = probability[6]
+            
+            data.append([framecount, prediction, confident,enthusiastic,frustrated,nervous,neutral,scared,uncomfortable])
 
-        if framecount % args["frame_step"] == 0:
-            prediction, idx, probability = learn.predict(Image(pil2tensor(img_cp, np.float32).div_(225)))
-            data.append([framecount, prediction, probability, ear])
-
-        cv2.rectangle(
-                img=frame,
-                pt1=(X_1, Y_1),
-                pt2=(X_2, Y_2),
-                color=(128, 128, 0),
-                thickness=2,
-            )
-
+    
         cv2.putText(frame, str(prediction), (10, frame.shape[0] - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (225, 255, 255), 2)
 
     cv2.imshow("frame", frame)
@@ -114,9 +109,13 @@ while vidcap.more():
         break
 
 if args["savedata"]:
-    df = pd.DataFrame(data, columns = ['Framecount', 'Expression', 'Probability', 'EAR'])
-    df.to_csv(path+'/export.csv')
-    print("data saved to export.csv")
+    bodyLanguageFile = "/BL_"+ args["video_file"] +".csv"
+    attentionFile = "/A_"+ args["video_file"] +".csv"
+    df = pd.DataFrame(data, columns = ['Framecount', 'Prediction','Confident', 'Enthusiastic', 'Frustrated', 'Nervous', 'Neutral', 'Scared', 'Uncomfortable'])
+    df.to_csv(path+bodyLanguageFile)
+    df2 = pd.DataFrame(atten, columns = ['Framecount', 'Attention'])
+    df2.to_csv(path+attentionFile)
+    print("data saved!")
 vidcap.stop()
 if args["save"]:
     print("done saving")
